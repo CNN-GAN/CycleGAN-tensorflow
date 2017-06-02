@@ -21,6 +21,7 @@ class cyclegan(object):
         self.dataset_dir = args.dataset_dir
 
         self.discriminator = discriminator
+        self.discriminatorAB = discriminatorAB
         if args.use_resnet:
             self.generator = generator_resnet
         else:
@@ -55,10 +56,15 @@ class cyclegan(object):
 
         self.DB_fake = self.discriminator(self.fake_B, self.options, reuse=False, name="discriminatorB")
         self.DA_fake = self.discriminator(self.fake_A, self.options, reuse=False, name="discriminatorA")
+        self.DA2B    = self.discriminatorAB(self.real_A, self.fake_B, self.options, reuse=False, name="discriminatorAB")
+        self.DB2A    = self.discriminatorAB(self.fake_A, self.real_B, self.options, reuse=True,  name="discriminatorAB")
+
         self.g_loss_a2b = self.criterionGAN(self.DB_fake, tf.ones_like(self.DB_fake)) \
+                            + self.criterionGAN(self.DA2B, tf.ones_like(self.DA2B)) \
                             + self.L1_lambda * abs_criterion(self.real_A, self.fake_A_) \
                             + self.L1_lambda * abs_criterion(self.real_B, self.fake_B_)
         self.g_loss_b2a = self.criterionGAN(self.DA_fake, tf.ones_like(self.DA_fake)) \
+                            + self.criterionGAN(self.DB2A, tf.ones_like(self.DB2A)) \
                             + self.L1_lambda * abs_criterion(self.real_A, self.fake_A_) \
                             + self.L1_lambda * abs_criterion(self.real_B, self.fake_B_)
 
@@ -79,6 +85,10 @@ class cyclegan(object):
         self.da_loss_real = self.criterionGAN(self.DA_real, tf.ones_like(self.DA_real))
         self.da_loss_fake = self.criterionGAN(self.DA_fake_sample, tf.zeros_like(self.DA_fake_sample))
         self.da_loss = (self.da_loss_real + self.da_loss_fake) / 2
+        
+        self.da2b_loss    = self.criterionGAN(self.DA2B, tf.ones_like(self.DA2B))
+        self.db2a_loss    = self.criterionGAN(self.DB2A, tf.zeros_like(self.DB2A))
+        self.dab_loss     = (self.da2b_loss + self.db2a_loss)/2
 
         self.g_a2b_sum = tf.summary.scalar("g_loss_a2b", self.g_loss_a2b)
         self.g_b2a_sum = tf.summary.scalar("g_loss_b2a", self.g_loss_b2a)
@@ -88,11 +98,18 @@ class cyclegan(object):
         self.db_loss_fake_sum = tf.summary.scalar("db_loss_fake", self.db_loss_fake)
         self.da_loss_real_sum = tf.summary.scalar("da_loss_real", self.da_loss_real)
         self.da_loss_fake_sum = tf.summary.scalar("da_loss_fake", self.da_loss_fake)
+        self.da2b_loss_sum = tf.summary.scalar("da2b_loss", self.da2b_loss)
+        self.db2a_loss_sum = tf.summary.scalar("db2a_loss", self.db2a_loss)
+        self.dab_loss_sum  = tf.summary.scalar("dab_loss", self.dab_loss)
+ 
         self.db_sum = tf.summary.merge(
             [self.db_loss_sum, self.db_loss_real_sum, self.db_loss_fake_sum]
         )
         self.da_sum = tf.summary.merge(
             [self.da_loss_sum, self.da_loss_real_sum, self.da_loss_fake_sum]
+        )
+        self.dab_sum = tf.summary.merge(
+            [self.da2b_loss_sum, self.db2a_loss_sum, self.dab_loss_sum]
         )
 
         self.test_A = tf.placeholder(tf.float32,
@@ -107,6 +124,7 @@ class cyclegan(object):
         t_vars = tf.trainable_variables()
         self.db_vars = [var for var in t_vars if 'discriminatorB' in var.name]
         self.da_vars = [var for var in t_vars if 'discriminatorA' in var.name]
+        self.dab_vars = [var for var in t_vars if 'discriminatorAB' in var.name]
         self.g_vars_a2b = [var for var in t_vars if 'generatorA2B' in var.name]
         self.g_vars_b2a = [var for var in t_vars if 'generatorB2A' in var.name]
         for var in t_vars: print var.name
@@ -117,6 +135,8 @@ class cyclegan(object):
                         .minimize(self.da_loss, var_list=self.da_vars)
         self.db_optim = tf.train.AdamOptimizer(args.lr, beta1=args.beta1) \
                         .minimize(self.db_loss, var_list=self.db_vars)
+        self.dab_optim = tf.train.AdamOptimizer(args.lr, beta1=args.beta1) \
+                         .minimize(self.dab_loss, var_list=self.dab_vars)
         self.g_a2b_optim = tf.train.AdamOptimizer(args.lr, beta1=args.beta1) \
                         .minimize(self.g_loss_a2b, var_list=self.g_vars_a2b)
         self.g_b2a_optim = tf.train.AdamOptimizer(args.lr, beta1=args.beta1) \
@@ -151,23 +171,27 @@ class cyclegan(object):
                 fake_A, fake_B = self.sess.run([self.fake_A, self.fake_B],
                     feed_dict={ self.real_data: batch_images })
                 [fake_A, fake_B] = self.pool([fake_A, fake_B])
-                # Update G network
+                # Update G_a2b network
                 _, summary_str = self.sess.run([self.g_a2b_optim, self.g_a2b_sum],
                     feed_dict={ self.real_data: batch_images })
                 self.writer.add_summary(summary_str, counter)
-                # Update D network
+                # Update Db network
                 _, summary_str = self.sess.run([self.db_optim, self.db_sum],
                    feed_dict={ self.real_data: batch_images,
                                self.fake_B_sample: fake_B })
                 self.writer.add_summary(summary_str, counter)
-                # Update G network
+                # Update G_b2a network
                 _, summary_str = self.sess.run([self.g_b2a_optim, self.g_b2a_sum],
                     feed_dict={ self.real_data: batch_images })
                 self.writer.add_summary(summary_str, counter)
-                # Update D network
+                # Update Da network
                 _, summary_str = self.sess.run([self.da_optim, self.da_sum],
                    feed_dict={ self.real_data: batch_images,
                                self.fake_A_sample: fake_A})
+                self.writer.add_summary(summary_str, counter)
+                # Update Dab network
+                _, summary_str = self.sess.run([self.dab_optim, self.dab_sum],
+                                               feed_dict={self.real_data: batch_images})
                 self.writer.add_summary(summary_str, counter)
 
                 counter += 1

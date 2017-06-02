@@ -25,6 +25,41 @@ def discriminator(image, options, reuse=False, name="discriminator"):
         # h4 is (32 x 32 x 1)
         return h4
 
+def discriminatorAB(imageA, imageB, options, reuse=False, name="discriminatorAB"):
+
+    with tf.variable_scope(name):
+        # image is 256 x 256 x input_c_dim
+        if reuse:
+            tf.get_variable_scope().reuse_variables()
+        else:
+            assert tf.get_variable_scope().reuse == False
+
+        m1_h0 = lrelu(conv2d(imageA, options.df_dim, name='d1_h0_conv'))
+        # h0 is (128 x 128 x self.df_dim)
+        m1_h1 = lrelu(instance_norm(conv2d(m1_h0, options.df_dim*2, name='d1_h1_conv'), 'd1_bn1'))
+        # h1 is (64 x 64 x self.df_dim*2)
+        m1_h2 = lrelu(instance_norm(conv2d(m1_h1, options.df_dim*4, name='d1_h2_conv'), 'd1_bn2'))
+        # h2 is (32x 32 x self.df_dim*4)
+        m1_h3 = lrelu(instance_norm(conv2d(m1_h2, options.df_dim*8, s=1, name='d1_h3_conv'), 'd1_bn3'))
+        # h3 is (32 x 32 x self.df_dim*8)
+        m1_h4 = conv2d(m1_h3, 1, s=1, name='d1_h3_pred')
+        # h4 is (32 x 32 x 1)
+
+
+        m2_h0 = lrelu(conv2d(imageB, options.df_dim, name='d2_h0_conv'))
+        # h0 is (128 x 128 x self.df_dim)
+        m2_h1 = lrelu(instance_norm(conv2d(m2_h0, options.df_dim*2, name='d2_h1_conv'), 'd2_bn1'))
+        # h1 is (64 x 64 x self.df_dim*2)
+        m2_h2 = lrelu(instance_norm(conv2d(m2_h1, options.df_dim*4, name='d2_h2_conv'), 'd2_bn2'))
+        # h2 is (32x 32 x self.df_dim*4)
+        m2_h3 = lrelu(instance_norm(conv2d(m2_h2, options.df_dim*8, s=1, name='d2_h3_conv'), 'd2_bn3'))
+        # h3 is (32 x 32 x self.df_dim*8)
+        m2_h4 = conv2d(m2_h3, 1, s=1, name='d2_h3_pred')
+        # h4 is (32 x 32 x 1)
+        
+        m_out = tf.concat([m1_h4, m2_h4], 0)
+        return m_out
+
 def generator_unet(image, options, reuse=False, name="generator"):
 
     with tf.variable_scope(name):
